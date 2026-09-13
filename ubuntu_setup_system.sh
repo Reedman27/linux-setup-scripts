@@ -599,6 +599,16 @@ log_info "To connect to your private network: sudo tailscale up"
 echo "========================================================"
 
 # ------------------------------------------------------------------------------
+# Ownership Fix
+# ------------------------------------------------------------------------------
+# A bunch of the steps above ran under sudo (repo files, keyrings, the Snap
+# purge, apt itself), and it's easy for something under $HOME to accidentally
+# end up root-owned along the way. Hand everything in $HOME back to you
+# before finishing up.
+log_info "Fixing ownership of ${HOME} back to ${USER}..."
+sudo chown -R "${USER}:${USER}" "${HOME}"
+
+# ------------------------------------------------------------------------------
 # Reboot Prompt
 # ------------------------------------------------------------------------------
 REBOOT_CHOICE=""
