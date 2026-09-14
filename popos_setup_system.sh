@@ -556,50 +556,20 @@ fi
 sudo apt autoclean
 
 # ------------------------------------------------------------------------------
-# Interactive Flatpak scope picker (openSUSE-style "user or system?" prompt)
+# Zsh Config (pulled straight from your linux-setup-scripts repo)
 # ------------------------------------------------------------------------------
-log_info "Installing interactive Flatpak scope picker into shell configs..."
-MARKER="# >>> flatpak scope picker >>>"
-read -r -d '' FLATPAK_PICKER_BLOCK <<'EOF' || true
-
-# >>> flatpak scope picker >>>
-# Wraps `flatpak install` so it asks whether to install for just you
-# (user, no sudo) or for everyone on the machine (system, needs sudo),
-# similar to the prompt openSUSE Tumbleweed shows.
-flatpak() {
-    if [[ "$1" == "install" ]]; then
-        shift
-        local scope_choice
-        echo "Flatpak install scope:"
-        echo "  1) User   - only your account, no sudo required"
-        echo "  2) System - all users on this machine, requires sudo"
-        printf '%s' "Select [1/2] (default 1): "
-        read -r scope_choice
-        case "${scope_choice}" in
-            2)
-                sudo command flatpak install --system "$@"
-                ;;
-            *)
-                command flatpak install --user "$@"
-                ;;
-        esac
-    else
-        command flatpak "$@"
-    fi
-}
-# <<< flatpak scope picker <<<
-EOF
-
-for RC_FILE in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
-    touch "${RC_FILE}"
-    if grep -qF "${MARKER}" "${RC_FILE}"; then
-        log_info "Flatpak scope picker already present in ${RC_FILE}, skipping."
-    else
-        printf '%s\n' "${FLATPAK_PICKER_BLOCK}" >> "${RC_FILE}"
-        log_success "Flatpak scope picker installed into ${RC_FILE}."
-    fi
-done
-log_info "Restart your shell (or 'source ~/.zshrc') to use the picker."
+log_info "Fetching your .zshrc from linux-setup-scripts..."
+ZSHRC_URL="https://github.com/Reedman27/linux-setup-scripts/raw/refs/heads/main/.zshrc"
+if [[ -f "${HOME}/.zshrc" ]]; then
+    cp "${HOME}/.zshrc" "${HOME}/.zshrc.bak.$(date +%s)"
+    log_info "Backed up existing ~/.zshrc before overwriting."
+fi
+if curl -fsSL -o "${HOME}/.zshrc" "${ZSHRC_URL}"; then
+    log_success "Downloaded .zshrc to ${HOME}/.zshrc."
+else
+    log_warn "Could not download .zshrc from ${ZSHRC_URL} — leaving your existing config as-is."
+fi
+log_info "Restart your shell (or 'source ~/.zshrc') to pick up the new config."
 
 # Verify installation of core targets
 echo "========================================================"
