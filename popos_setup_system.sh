@@ -326,46 +326,121 @@ fi
 rm -f "${CIDER_KEY_TMP}"
 
 # ------------------------------------------------------------------------------
-# Fastfetch Repository
+# Fastfetch (installed standalone, decoupled from the CLI tools group below)
 # ------------------------------------------------------------------------------
-# fastfetch is NOT in noble/jammy's default apt repos at all (it only lands
-# in Ubuntu's own Universe archive starting with 26.04 "resolute"), so on
-# every Pop!_OS base today the plain `apt install fastfetch` below would 404
-# with "Unable to locate package" and, under `set -Eeuo pipefail`, take the
-# entire rest of that install line down with it (alacritty/btop/git/neovim/
-# zip/unzip never get installed either, even though they were all fine).
-# Check first so we don't add a redundant PPA on any future base where
-# fastfetch does ship natively, and guard the PPA add the same way as Cider
-# above so a flaky Launchpad mirror can't take the whole script down.
-log_info "Checking fastfetch availability..."
-if apt-cache show fastfetch >/dev/null 2>&1; then
-    log_info "fastfetch is already available in existing repos — no PPA needed."
+# fastfetch is NOT in noble/jammy's default apt repos at all, so bundling it
+# into the same `apt install` line as alacritty/btop/git/neovim/zip/unzip is
+# exactly what bit us before: apt 404s on "Unable to locate package
+# fastfetch" and, under `set -Eeuo pipefail`, takes that ENTIRE line down
+# with it -- none of those other, perfectly fine tools get installed either.
+# Handle fastfetch entirely on its own here instead: check whether it's
+# already installed, and if not, add the maintainer PPA and install just
+# fastfetch by itself so a hiccup here can never hold the rest of the CLI
+# tools hostage again. The PPA add is guarded the same way as Cider above so
+# a flaky Launchpad mirror can't take the whole script down either.
+log_info "Checking whether fastfetch is already installed..."
+if dpkg -s fastfetch >/dev/null 2>&1; then
+    log_info "fastfetch is already installed — skipping."
 else
-    log_info "fastfetch not found in default repos — adding maintainer PPA (ppa:zhangsongcui3371/fastfetch)..."
-    if sudo add-apt-repository -y ppa:zhangsongcui3371/fastfetch >/dev/null 2>&1; then
-        sudo apt update
-        if apt-cache show fastfetch >/dev/null 2>&1; then
-            log_success "Fastfetch PPA added; fastfetch is now installable."
+    if ! apt-cache show fastfetch >/dev/null 2>&1; then
+        log_info "fastfetch not found in default repos — adding maintainer PPA (ppa:zhangsongcui3371/fastfetch)..."
+        if sudo add-apt-repository -y ppa:zhangsongcui3371/fastfetch >/dev/null 2>&1; then
+            sudo apt update
         else
-            log_warn "Fastfetch PPA was added but fastfetch still isn't showing up — it will likely fail to install below. Grab it manually from https://github.com/fastfetch-cli/fastfetch/releases if so."
+            log_warn "Could not add the fastfetch PPA (Launchpad may be unreachable) — fastfetch install below may fail."
         fi
+    fi
+
+    if apt-cache show fastfetch >/dev/null 2>&1; then
+        log_info "Installing fastfetch..."
+        sudo apt install -y fastfetch \
+            && log_success "fastfetch installed." \
+            || log_warn "fastfetch failed to install — grab it manually from https://github.com/fastfetch-cli/fastfetch/releases if needed."
     else
-        log_warn "Could not add the fastfetch PPA (Launchpad may be unreachable) — fastfetch install below may fail. Grab it manually from https://github.com/fastfetch-cli/fastfetch/releases if so."
+        log_warn "fastfetch still isn't available after adding the PPA — grab it manually from https://github.com/fastfetch-cli/fastfetch/releases."
     fi
 fi
 
 # ------------------------------------------------------------------------------
 # User-Requested CLI/Dev Tools
 # ------------------------------------------------------------------------------
+# fastfetch is deliberately NOT in this list anymore -- see the standalone
+# block above for why.
 log_info "Installing additional CLI/dev tools..."
 sudo apt install -y \
     alacritty \
     btop \
-    fastfetch \
     git \
     neovim \
     zip \
     unzip
+
+# ------------------------------------------------------------------------------
+# Alacritty Frosted-Glass Theme (real values from your exported COSMIC theme)
+# ------------------------------------------------------------------------------
+# Every color and the opacity value below come straight from a Dark.ron
+# theme exported via Settings -> Appearance -> Export, NOT a hand-picked
+# guess like earlier drafts of this script. bg_color, accent, and the
+# accent_*/ext_*/bright_* palette entries map onto Alacritty's ANSI slots
+# below; opacity uses the theme's own alpha_map.medium value since this
+# theme's frosted level is set to "Medium" (frosted_windows: true confirms
+# frosting is actually enabled, not just assumed).
+# One caveat still applies: `blur = true` is Alacritty's documented
+# request-a-blur-from-the-compositor flag, officially confirmed working on
+# macOS/KDE Wayland. cosmic-comp is also wlroots-based, so this is a
+# reasonable ask, not a guaranteed-supported combo -- worst case it's simply
+# ignored and you get the flat translucent opacity underneath, no error.
+log_info "Applying frosted-glass Alacritty theme..."
+ALACRITTY_CONFIG_DIR="${HOME}/.config/alacritty"
+ALACRITTY_CONFIG_FILE="${ALACRITTY_CONFIG_DIR}/alacritty.toml"
+mkdir -p "${ALACRITTY_CONFIG_DIR}"
+if [[ -f "${ALACRITTY_CONFIG_FILE}" ]]; then
+    cp "${ALACRITTY_CONFIG_FILE}" "${ALACRITTY_CONFIG_FILE}.bak.$(date +%s)"
+    log_info "Backed up existing alacritty.toml before overwriting."
+fi
+cat > "${ALACRITTY_CONFIG_FILE}" <<'EOF'
+# Frosted-glass theme, pulled directly from an exported COSMIC Dark.ron.
+# Generated by popos_setup_system.sh -- tweak freely, this won't be
+# overwritten unless you rerun the setup script.
+
+[window]
+opacity = 0.7615
+blur = true
+dynamic_padding = true
+
+[window.padding]
+x = 10
+y = 10
+
+[colors.primary]
+background = "#2B2E34"
+foreground = "#E2E2E2"
+
+[colors.cursor]
+text = "#2B2E34"
+cursor = "#E79CFE"
+
+[colors.normal]
+black   = "#1B1B1B"
+red     = "#FDA1A0"
+green   = "#92CF9C"
+yellow  = "#F7E062"
+blue    = "#63D0DF"
+magenta = "#E79CFE"
+cyan    = "#48B9C7"
+white   = "#ABABAB"
+
+[colors.bright]
+black   = "#5E5E5E"
+red     = "#FFA090"
+green   = "#5EDB8C"
+yellow  = "#FEDB40"
+blue    = "#3E88FF"
+magenta = "#CF7DFF"
+cyan    = "#A1C0EB"
+white   = "#FFFFFF"
+EOF
+log_success "Frosted-glass Alacritty theme written to ${ALACRITTY_CONFIG_FILE}."
 
 # ------------------------------------------------------------------------------
 # User-Requested Desktop Apps
