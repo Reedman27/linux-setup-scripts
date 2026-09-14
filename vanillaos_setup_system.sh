@@ -272,11 +272,16 @@ else
     fi
 fi
 
+# NOTE: Cider Collective's repo docs are explicit that a valid license
+# (purchased from cider.sh) is required for USE even though the package
+# itself installs for free — installing here does not activate it.
 log_info "Installing Cider..."
 if apt-cache show cider >/dev/null 2>&1; then
-    sudo apt install -y cider || log_warn "cider package was listed but failed to install — grab the AppImage manually from https://cider.sh instead."
+    sudo apt install -y cider \
+        && log_success "Cider installed — remember it needs a purchased license from https://cider.sh to actually run; the apt package alone doesn't include one." \
+        || log_warn "cider package was listed but failed to install — grab the AppImage manually from https://cider.sh instead."
 else
-    log_warn "Cider package not available via apt right now. Skipping automated install — grab the AppImage manually from https://cider.sh and run it directly (it's self-executing once libfuse2 is installed, done below) to keep Discord RPC working. Flatpak is intentionally NOT used here since Flatpak's sandboxing breaks Discord RPC."
+    log_warn "Cider package not available via apt right now. Skipping automated install — grab the AppImage manually from https://cider.sh and run it directly (it's self-executing once libfuse2 is installed, done below) to keep Discord RPC working. Flatpak is intentionally NOT used here since Flatpak's sandboxing breaks Discord RPC. Either way, a purchased license from cider.sh is required to use it."
 fi
 
 # ------------------------------------------------------------------------------
@@ -499,7 +504,7 @@ for fp_app in Steam Nheko Aonsoku "Extension Manager" Tweaks OpenBubbles "Proton
 done
 
 if dpkg -s "cider" >/dev/null 2>&1; then
-    log_success "Cider is installed via apt."
+    log_success "Cider is installed via apt (remember: still needs a purchased license from https://cider.sh to actually run)."
 else
     log_warn "Cider is NOT installed via apt — grab the AppImage manually if you still want it (keeps Discord RPC working, unlike Flatpak)."
 fi
