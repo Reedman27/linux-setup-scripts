@@ -29,7 +29,7 @@ trap_error() {
     local parent_lineno="$1"
     local message="$2"
     local code="${3:-1}"
-    echo -e "\n${RED}❌ Error: Command failed on line ${parent_lineno} with exit code ${code}.${NC}"
+    echo -e "\n${RED}❌ Error: Command failed on line ${parent_lineno} (${message}) with exit code ${code}.${NC}"
     echo -e "${YELLOW}Check the log file for details: ${LOG_FILE}${NC}\n"
     exit "${code}"
 }
@@ -60,8 +60,19 @@ if [ -f /etc/os-release ]; then
     # grep -oP returns exit 1 when the field is absent, which under
     # pipefail would otherwise trip the generic ERR trap instead of
     # this function's own error message, so we tolerate that here.
+    OS_ID=$(grep -oP '(?<=^ID=).*' /etc/os-release 2>/dev/null | tr -d '"' || true)
+    OS_ID_LIKE=$(grep -oP '(?<=^ID_LIKE=).*' /etc/os-release 2>/dev/null | tr -d '"' || true)
     UBUNTU_CODENAME=$(grep -oP '(?<=VERSION_CODENAME=).*' /etc/os-release 2>/dev/null | tr -d '"' || true)
     UBUNTU_RELEASE=$(grep -oP '(?<=VERSION_ID=).*' /etc/os-release 2>/dev/null | tr -d '"' || true)
+
+    # Refuse to run on anything that isn't actually Ubuntu (or an Ubuntu
+    # derivative, e.g. Kubuntu/Xubuntu, which also report ID=ubuntu). This
+    # script purges Snap and rewrites apt sources, so it needs to be sure
+    # it's on the OS it thinks it is before touching any of that.
+    if [[ "${OS_ID}" != "ubuntu" && "${OS_ID_LIKE}" != *"ubuntu"* ]]; then
+        log_error "This script requires Ubuntu or an Ubuntu-based derivative (detected ID='${OS_ID}'). Refusing to run — it modifies repos and purges Snap based on assumptions specific to Ubuntu."
+        exit 1
+    fi
 
     if [[ -z "${UBUNTU_CODENAME}" ]]; then
         log_error "Could not determine VERSION_CODENAME from /etc/os-release. Is this an Ubuntu-based system?"
@@ -362,7 +373,7 @@ else
     log_info "Installing Brave Browser..."
     if ! sudo apt install -y brave-browser; then
         log_warn "Standard brave-browser package not found. Attempting brave-origin fallback..."
-        sudo apt install -y brave-origin
+        sudo apt install -y brave-origin || log_warn "Neither brave-browser nor brave-origin could be installed. Skipping Brave for now."
     fi
 fi
 
@@ -385,9 +396,9 @@ fi
 # Install Cider
 log_info "Installing Cider..."
 if apt-cache show cider >/dev/null 2>&1; then
-    sudo apt install -y cider
+    sudo apt install -y cider || log_warn "cider package was listed but failed to install — grab the AppImage manually from https://cider.sh instead."
 else
-    log_error "Cider package was not found in the custom repository. Skipping (Flatpak build is outdated, not used)."
+    log_warn "Cider package was not found in the custom repository. Skipping (Flatpak build is outdated, not used) — grab the AppImage manually from https://cider.sh if you still want it."
 fi
 
 # ------------------------------------------------------------------------------
@@ -396,7 +407,7 @@ fi
 log_info "Installing Discord..."
 DISCORD_DEB="/tmp/discord.deb"
 if curl -fsSL -o "${DISCORD_DEB}" "https://discord.com/api/download?platform=linux&format=deb"; then
-    sudo apt install -y "${DISCORD_DEB}"
+    sudo apt install -y "${DISCORD_DEB}" || log_warn "Downloaded Discord's .deb but the install failed — check ${DISCORD_DEB} manually."
     rm -f "${DISCORD_DEB}"
 else
     log_warn "Could not download Discord .deb; skipping."
@@ -435,6 +446,7 @@ EXTRA_FLATPAKS=(
     "io.github.unknownskl.greenlight"  # Greenlight - xCloud/Xbox home streaming
     "net.lrclib.lrcget"                # LRCGET - lyrics downloader
     "org.gnome.Geary"                  # Geary - email client
+    "org.libreoffice.LibreOffice"      # LibreOffice
     "org.localsend.localsend_app"      # LocalSend
     "org.mozilla.thunderbird_esr"      # Thunderbird
     "org.videolan.VLC"                 # VLC
@@ -447,8 +459,12 @@ done
 # ------------------------------------------------------------------------------
 # LibrePods (AirPods on Linux) - AppImage, no apt/Flatpak package
 # ------------------------------------------------------------------------------
+log_info "Installing AppImage support..."
+sudo apt install -y libfuse2t64 || sudo apt install -y libfuse2 || log_warn "Could not install a libfuse2 package by either name — AppImages may not run without it."
+sudo apt install -y jq
+flatpak install -y --user flathub io.github.probonopd.AppImageLauncher 2>/dev/null || true
+
 log_info "Installing LibrePods..."
-sudo apt install -y libfuse2t64 jq
 LIBREPODS_DIR="${HOME}/.local/bin"
 mkdir -p "${LIBREPODS_DIR}"
 
@@ -579,7 +595,7 @@ else
     log_warn "LibrePods AppImage could not be verified."
 fi
 
-for fp_app in Nheko Aonsoku "Extension Manager" Tweaks OpenBubbles "Proton VPN" Bottles VSCodium Greenlight LRCGET Geary LocalSend Thunderbird VLC Sober; do
+for fp_app in Nheko Aonsoku "Extension Manager" Tweaks OpenBubbles "Proton VPN" Bottles VSCodium Greenlight LRCGET Geary LibreOffice LocalSend Thunderbird VLC Sober; do
     if flatpak list | grep -q "${fp_app}"; then
         log_success "${fp_app} (Flatpak) is installed."
     else
