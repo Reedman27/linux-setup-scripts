@@ -4,8 +4,8 @@
 # Made by reedman27
 # Supports: Ubuntu 25.10 (Questing), Ubuntu 26.04 LTS (Resolute), & newer.
 # ==============================================================================
-# This script is completely safe to rerun (idempotent), logs actions to a file, 
-# and automatically falls back to older Ubuntu codenames if third-party vendors 
+# This script is completely safe to rerun (idempotent), logs actions to a file,
+# and automatically falls back to older Ubuntu codenames if third-party vendors
 # have not yet published packages for your exact release.
 # ==============================================================================
 
@@ -92,7 +92,7 @@ CODENAME_FALLBACKS=("resolute" "questing" "plucky" "oracular" "noble" "jammy")
 find_working_codename() {
     local repo_base_url="$1"
     local test_path_suffix="$2" # e.g., "dists/{codename}/Release"
-    
+
     # First, test the system's actual codename
     local test_url="${repo_base_url}/${test_path_suffix//\{codename\}/${UBUNTU_CODENAME}}"
     if curl -sSf -o /dev/null --connect-timeout 5 "${test_url}" 2>/dev/null; then
@@ -105,7 +105,7 @@ find_working_codename() {
     for fallback in "${CODENAME_FALLBACKS[@]}"; do
         # Skip if it is the same as current (already tested)
         [[ "$fallback" == "$UBUNTU_CODENAME" ]] && continue
-        
+
         test_url="${repo_base_url}/${test_path_suffix//\{codename\}/${fallback}}"
         if curl -sSf -o /dev/null --connect-timeout 5 "${test_url}" 2>/dev/null; then
             log_info "-> Found working fallback codename: ${fallback}"
@@ -306,6 +306,36 @@ else
     sudo rm -f /usr/share/keyrings/cider-archive-keyring.gpg /etc/apt/sources.list.d/cider.list
 fi
 rm -f "${CIDER_KEY_TMP}"
+
+# ------------------------------------------------------------------------------
+# Fastfetch Repository
+# ------------------------------------------------------------------------------
+# fastfetch only lands in Ubuntu's own Universe archive starting with 26.04
+# "resolute" -- it's absent from every codename before that (questing,
+# plucky, noble, jammy, ...). If this script is ever run on one of those
+# older bases, the plain `apt install fastfetch` below would 404 with
+# "Unable to locate package" and, under `set -Eeuo pipefail`, take the
+# entire rest of that install line down with it (alacritty/btop/git/neovim/
+# zip/unzip never get installed either, even though they were all fine).
+# Check first so we don't add a redundant PPA on 26.04+ where it's already
+# native, and guard the PPA add the same way as Cider above so a flaky
+# Launchpad mirror can't take the whole script down.
+log_info "Checking fastfetch availability..."
+if apt-cache show fastfetch >/dev/null 2>&1; then
+    log_info "fastfetch is already available in existing repos — no PPA needed."
+else
+    log_info "fastfetch not found in default repos — adding maintainer PPA (ppa:zhangsongcui3371/fastfetch)..."
+    if sudo add-apt-repository -y ppa:zhangsongcui3371/fastfetch >/dev/null 2>&1; then
+        sudo apt update
+        if apt-cache show fastfetch >/dev/null 2>&1; then
+            log_success "Fastfetch PPA added; fastfetch is now installable."
+        else
+            log_warn "Fastfetch PPA was added but fastfetch still isn't showing up — it will likely fail to install below. Grab it manually from https://github.com/fastfetch-cli/fastfetch/releases if so."
+        fi
+    else
+        log_warn "Could not add the fastfetch PPA (Launchpad may be unreachable) — fastfetch install below may fail. Grab it manually from https://github.com/fastfetch-cli/fastfetch/releases if so."
+    fi
+fi
 
 # ------------------------------------------------------------------------------
 # User-Requested CLI/Dev Tools
