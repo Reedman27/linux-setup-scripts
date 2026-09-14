@@ -394,8 +394,26 @@ sudo apt autoremove -y
 sudo apt autoclean
 
 # ------------------------------------------------------------------------------
+# Zsh Config (pulled straight from your linux-setup-scripts repo)
+# ------------------------------------------------------------------------------
+log_info "Fetching your .zshrc from linux-setup-scripts..."
+ZSHRC_URL="https://github.com/Reedman27/linux-setup-scripts/raw/refs/heads/main/.zshrc"
+if [[ -f "${HOME}/.zshrc" ]]; then
+    cp "${HOME}/.zshrc" "${HOME}/.zshrc.bak.$(date +%s)"
+    log_info "Backed up existing ~/.zshrc before overwriting."
+fi
+if curl -fsSL -o "${HOME}/.zshrc" "${ZSHRC_URL}"; then
+    log_success "Downloaded .zshrc to ${HOME}/.zshrc."
+else
+    log_warn "Could not download .zshrc from ${ZSHRC_URL} — leaving your existing config as-is."
+fi
+log_info "Restart your shell (or 'source ~/.zshrc') to pick up the new config."
+
+# ------------------------------------------------------------------------------
 # Interactive Flatpak scope picker (openSUSE-style "user or system?" prompt)
 # ------------------------------------------------------------------------------
+# Runs AFTER the .zshrc fetch above so this block lands in the freshly pulled
+# config instead of getting wiped out by it.
 log_info "Installing interactive Flatpak scope picker into shell configs..."
 MARKER="# >>> flatpak scope picker >>>"
 read -r -d '' FLATPAK_PICKER_BLOCK <<'EOF' || true
