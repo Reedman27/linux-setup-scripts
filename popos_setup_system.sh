@@ -460,27 +460,70 @@ log_info "Enabling 32-bit (i386) architecture for Steam..."
 sudo dpkg --add-architecture i386
 
 # ------------------------------------------------------------------------------
-# GRUB / Dual-Boot (Windows) Detection
+# Bootloader / Dual-Boot (Windows) Detection
 # ------------------------------------------------------------------------------
-log_info "Configuring GRUB to detect Windows for dual-boot..."
-sudo apt install -y os-prober
+# Pop!_OS 24.04 defaults to systemd-boot (managed via kernelstub), not GRUB —
+# /etc/default/grub simply won't exist on a stock install. Detect which
+# bootloader is actually active and handle Windows detection the right way
+# for each, instead of assuming GRUB and silently no-op'ing on systemd-boot.
+log_info "Detecting active bootloader for Windows dual-boot support..."
 
 GRUB_DEFAULT_FILE="/etc/default/grub"
+BOOTLOADER=""
 if [[ -f "${GRUB_DEFAULT_FILE}" ]]; then
-    # Modern GRUB ships with os-prober disabled by default (CVE-2020-10713
-    # hardening). Dual-boot setups need it enabled to detect Windows.
-    if grep -q '^GRUB_DISABLE_OS_PROBER=' "${GRUB_DEFAULT_FILE}"; then
-        sudo sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' "${GRUB_DEFAULT_FILE}"
-    elif grep -q '^#GRUB_DISABLE_OS_PROBER=' "${GRUB_DEFAULT_FILE}"; then
-        sudo sed -i 's/^#GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' "${GRUB_DEFAULT_FILE}"
-    else
-        echo 'GRUB_DISABLE_OS_PROBER=false' | sudo tee -a "${GRUB_DEFAULT_FILE}" >/dev/null
-    fi
-    sudo update-grub
-    log_success "GRUB updated with os-prober enabled; Windows should now appear in the boot menu."
-else
-    log_warn "${GRUB_DEFAULT_FILE} not found; skipping GRUB os-prober configuration."
+    BOOTLOADER="grub"
+elif command -v bootctl >/dev/null 2>&1 && bootctl status 2>/dev/null | grep -qi "systemd-boot"; then
+    BOOTLOADER="systemd-boot"
 fi
+
+case "${BOOTLOADER}" in
+    grub)
+        log_info "GRUB detected — configuring os-prober..."
+        sudo apt install -y os-prober
+        # Modern GRUB ships with os-prober disabled by default (CVE-2020-10713
+        # hardening). Dual-boot setups need it enabled to detect Windows.
+        if grep -q '^GRUB_DISABLE_OS_PROBER=' "${GRUB_DEFAULT_FILE}"; then
+            sudo sed -i 's/^GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' "${GRUB_DEFAULT_FILE}"
+        elif grep -q '^#GRUB_DISABLE_OS_PROBER=' "${GRUB_DEFAULT_FILE}"; then
+            sudo sed -i 's/^#GRUB_DISABLE_OS_PROBER=.*/GRUB_DISABLE_OS_PROBER=false/' "${GRUB_DEFAULT_FILE}"
+        else
+            echo 'GRUB_DISABLE_OS_PROBER=false' | sudo tee -a "${GRUB_DEFAULT_FILE}" >/dev/null
+        fi
+        sudo update-grub
+        log_success "GRUB updated with os-prober enabled; Windows should now appear in the boot menu."
+        ;;
+    systemd-boot)
+        log_info "systemd-boot detected. Heads up: it only auto-lists EFI loaders sitting on its OWN ESP — if Windows lives on a separate ESP (common on machines with multiple distros/OEM partition layouts), it's real and bootable but genuinely won't appear in Pop!_OS's boot menu. That's an architectural limit, not something to configure around."
+
+        if command -v efibootmgr >/dev/null 2>&1; then
+            # NVRAM can retain "Windows Boot Manager" entries left over from a
+            # drive/partition that no longer exists (e.g. after a reinstall or
+            # swapping disks). Cross-check each entry's GPT partition UUID
+            # against partitions that are actually still on this machine
+            # before trusting it, instead of taking efibootmgr's word for it.
+            LIVE_PARTUUIDS=$(lsblk -no PARTUUID 2>/dev/null | tr '[:upper:]' '[:lower:]')
+            WIN_ENTRY_FOUND=false
+            while IFS= read -r win_line; do
+                WIN_GPT_UUID=$(echo "${win_line}" | grep -oP '(?<=GPT,)[0-9a-fA-F-]{36}' | tr '[:upper:]' '[:lower:]')
+                [[ -z "${WIN_GPT_UUID}" ]] && continue
+                if echo "${LIVE_PARTUUIDS}" | grep -qx "${WIN_GPT_UUID}"; then
+                    WIN_PART=$(lsblk -no NAME,PARTUUID | awk -v u="${WIN_GPT_UUID}" 'tolower($2)==u{print $1}')
+                    log_success "Live Windows Boot Manager confirmed on partition ${WIN_PART} (matches a real partition on this disk, not a stale NVRAM entry). Since it's registered directly with the firmware, use your machine's firmware boot menu at power-on (commonly F12/F10/Esc) to reach it, or run 'sudo efibootmgr' to note its Boot#### number and boot it once with 'sudo efibootmgr -n <num>' + reboot."
+                    WIN_ENTRY_FOUND=true
+                fi
+            done < <(sudo efibootmgr -v 2>/dev/null | grep -i "windows boot manager")
+
+            if [[ "${WIN_ENTRY_FOUND}" == false ]]; then
+                log_warn "No live Windows Boot Manager entry found — any 'Windows Boot Manager' lines in 'sudo efibootmgr -v' point to partitions that no longer exist on this disk (stale NVRAM from a previous drive/install). If you still expect to dual-boot Windows, verify it's actually installed and its ESP's bootmgfw.efi may need repairing from Windows recovery media (bootrec /fixboot)."
+            fi
+        else
+            log_warn "efibootmgr not found — install it to check Windows dual-boot status ('sudo apt install efibootmgr')."
+        fi
+        ;;
+    *)
+        log_warn "Could not determine active bootloader (no /etc/default/grub, and 'bootctl status' didn't report systemd-boot) — skipping Windows dual-boot detection. Check manually with 'bootctl status' or 'sudo update-grub'."
+        ;;
+esac
 
 # ------------------------------------------------------------------------------
 # APT Refresh & Target Installation
