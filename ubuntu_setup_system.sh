@@ -241,28 +241,10 @@ sudo flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/
 flatpak remote-add --if-not-exists --user flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
 # ------------------------------------------------------------------------------
-# Brave Browser Installation
+# Waterfox Browser (Flatpak — no official apt repo, PPA, or .deb exists)
 # ------------------------------------------------------------------------------
-if dpkg -s brave-browser >/dev/null 2>&1 || dpkg -s brave-origin >/dev/null 2>&1; then
-    log_info "Brave is already installed (brave-browser or brave-origin detected) — skipping repo setup and install."
-else
-    log_info "Configuring Brave Browser repository..."
-    sudo install -d -m 0755 /usr/share/keyrings
-
-    # Some Brave installers (or a prior run of this script under a different apt
-    # version) can leave behind a deb822-style .sources file that defines the
-    # same repo as the .list file below, causing apt to complain the same
-    # Packages target is "configured multiple times". Clear it first so we only
-    # ever have one definition.
-    sudo rm -f /etc/apt/sources.list.d/brave-browser-release.sources
-
-    curl -fsSL https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg \
-        | sudo tee /usr/share/keyrings/brave-browser-archive-keyring.gpg >/dev/null
-
-    # Note: Brave's stable distribution channel is simply "stable", no codename fallback needed here.
-    echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" \
-        | sudo tee /etc/apt/sources.list.d/brave-browser-release.list >/dev/null
-fi
+log_info "Installing Waterfox via Flatpak..."
+flatpak install -y --user flathub net.waterfox.waterfox || log_warn "Failed to install Waterfox via Flatpak."
 
 # ------------------------------------------------------------------------------
 # Tailscale Installation
@@ -288,7 +270,7 @@ fi
 # unreachable / rotating its signing key without notice. Because this script
 # runs under `set -Eeuo pipefail` with an ERR trap, blindly writing a repo
 # file here and letting a later `apt update` fail on it would abort the
-# ENTIRE script (Brave, Steam, everything downstream). So: verify
+# ENTIRE script (Steam, Discord, everything downstream). So: verify
 # the key AND the repo respond before committing anything, and never let
 # this one optional repo take the whole run down with it.
 log_info "Configuring Cider repository..."
@@ -395,17 +377,6 @@ fi
 # ------------------------------------------------------------------------------
 log_info "Updating system package list with new software sources..."
 sudo apt update
-
-# Install Brave
-if dpkg -s brave-browser >/dev/null 2>&1 || dpkg -s brave-origin >/dev/null 2>&1; then
-    log_info "Brave already installed — skipping."
-else
-    log_info "Installing Brave Browser..."
-    if ! sudo apt install -y brave-browser; then
-        log_warn "Standard brave-browser package not found. Attempting brave-origin fallback..."
-        sudo apt install -y brave-origin || log_warn "Neither brave-browser nor brave-origin could be installed. Skipping Brave for now."
-    fi
-fi
 
 # Install Tailscale
 if dpkg -s tailscale >/dev/null 2>&1; then
@@ -544,6 +515,43 @@ fi
 sudo apt autoclean
 
 # ------------------------------------------------------------------------------
+# Oh My Zsh + Plugins (the shared .zshrc pulled below assumes these exist)
+# ------------------------------------------------------------------------------
+log_info "Setting up Oh My Zsh..."
+export ZSH="${HOME}/.oh-my-zsh"
+if [[ -d "${ZSH}" ]]; then
+    log_info "Oh My Zsh is already installed — skipping."
+else
+    # --unattended: don't drop into a new zsh session mid-script.
+    # KEEP_ZSHRC=yes: we overwrite ~/.zshrc ourselves right after this, but
+    # keep the installer from touching it (and from making its own backup)
+    # first. CHSH=no: we already handle the default-shell switch above.
+    if RUNZSH=no CHSH=no KEEP_ZSHRC=yes sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"; then
+        log_success "Oh My Zsh installed to ${ZSH}."
+    else
+        log_warn "Oh My Zsh install script failed — the .zshrc pulled below won't work until you install it manually from https://ohmyz.sh."
+    fi
+fi
+
+log_info "Installing zsh plugins (autosuggestions, syntax-highlighting, completions)..."
+ZSH_CUSTOM="${ZSH_CUSTOM:-${ZSH}/custom}"
+declare -A ZSH_PLUGIN_REPOS=(
+    [zsh-autosuggestions]="https://github.com/zsh-users/zsh-autosuggestions"
+    [zsh-syntax-highlighting]="https://github.com/zsh-users/zsh-syntax-highlighting"
+    [zsh-completions]="https://github.com/zsh-users/zsh-completions"
+)
+for plugin_name in "${!ZSH_PLUGIN_REPOS[@]}"; do
+    plugin_dir="${ZSH_CUSTOM}/plugins/${plugin_name}"
+    if [[ -d "${plugin_dir}" ]]; then
+        log_info "${plugin_name} already present — skipping."
+    elif git clone --depth=1 "${ZSH_PLUGIN_REPOS[${plugin_name}]}" "${plugin_dir}"; then
+        log_success "${plugin_name} installed."
+    else
+        log_warn "Failed to clone ${plugin_name} — the .zshrc's plugins=() line will error on it until you install it manually."
+    fi
+done
+
+# ------------------------------------------------------------------------------
 # Zsh Config (pulled straight from your linux-setup-scripts repo)
 # ------------------------------------------------------------------------------
 log_info "Fetching your .zshrc from linux-setup-scripts..."
@@ -573,7 +581,6 @@ check_install_status() {
     fi
 }
 
-check_install_status "brave-browser"
 check_install_status "tailscale"
 check_install_status "discord"
 
@@ -600,7 +607,7 @@ else
     log_warn "LibrePods AppImage could not be verified."
 fi
 
-for fp_app in Nheko Aonsoku "Extension Manager" Tweaks OpenBubbles "Proton VPN" Bottles VSCodium Greenlight LRCGET Geary LibreOffice LocalSend Thunderbird VLC Sober; do
+for fp_app in Waterfox Nheko Aonsoku "Extension Manager" Tweaks OpenBubbles "Proton VPN" Bottles VSCodium Greenlight LRCGET Geary LibreOffice LocalSend Thunderbird VLC Sober; do
     if flatpak list | grep -q "${fp_app}"; then
         log_success "${fp_app} (Flatpak) is installed."
     else
